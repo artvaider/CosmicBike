@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Cosmic Bike 3D — базовый</title>
+  <title>Cosmic Bike 3D — базовый рабочий</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.min.js"></script>
   <style>
     body { margin:0; overflow:hidden; background:#000; touch-action:none; }
-    canvas { display:block; }
+    canvas { display:block; width:100%; height:100%; }
     #ui {
       position: absolute;
       inset: 0;
@@ -71,78 +71,67 @@ const tg = window.Telegram.WebApp;
 tg.ready();
 tg.expand();
 
-// Three.js
+// Three.js базовая сцена
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x000011);
+scene.background = new THREE.Color(0x000022);
 
 const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 4000);
-camera.position.set(0, 3, 8);
+camera.position.set(0, 4, 12);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
 document.body.appendChild(renderer.domElement);
 
-// Туннель
+// Туннель (простой цилиндр)
 const tunnel = new THREE.Mesh(
-  new THREE.CylinderGeometry(20, 20, 4000, 48, 1, true),
-  new THREE.MeshBasicMaterial({
-    color: 0x001133,
-    side: THREE.BackSide,
-    transparent: true,
-    opacity: 0.7
-  })
+  new THREE.CylinderGeometry(25, 25, 5000, 32, 1, true),
+  new THREE.MeshBasicMaterial({ color: 0x001144, side: THREE.BackSide })
 );
 tunnel.rotation.x = Math.PI / 2;
 scene.add(tunnel);
 
-// Звёзды
+// Звёзды (быстрый particle field)
 const starsGeometry = new THREE.BufferGeometry();
-const starsCount = 8000;
+const starsCount = 6000;
 const posArray = new Float32Array(starsCount * 3);
 for (let i = 0; i < starsCount * 3; i++) {
-  posArray[i] = (Math.random() - 0.5) * 2000;
+  posArray[i] = (Math.random() - 0.5) * 3000;
 }
 starsGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
 
-const starsMaterial = new THREE.PointsMaterial({
-  color: 0xffffff,
-  size: 1.2,
-  transparent: true,
-  opacity: 0.9
-});
-const starField = new THREE.Points(starsGeometry, starsMaterial);
-scene.add(starField);
+const stars = new THREE.Points(
+  starsGeometry,
+  new THREE.PointsMaterial({ color: 0xffffff, size: 2 })
+);
+scene.add(stars);
 
-// Велосипед (очень простой)
+// Велосипед — самый простой
 const bike = new THREE.Group();
-
-// Колёса
-const wheel = new THREE.Mesh(
-  new THREE.CircleGeometry(1.2, 24),
-  new THREE.MeshBasicMaterial({ color: 0xff5500 })
+const body = new THREE.Mesh(
+  new THREE.BoxGeometry(4, 1, 2),
+  new THREE.MeshBasicMaterial({ color: 0x00ff88 })
 );
-wheel.position.set(-1.5, -1.5, 0);
-bike.add(wheel.clone());
-wheel.position.x = 1.5;
-bike.add(wheel);
+bike.add(body);
 
-// Рама
-const frame = new THREE.Mesh(
-  new THREE.BoxGeometry(4, 0.6, 0.6),
-  new THREE.MeshBasicMaterial({ color: 0x00aaff })
-);
-frame.position.y = -0.8;
-bike.add(frame);
+const wheelGeo = new THREE.CircleGeometry(1.2, 16);
+const wheelMat = new THREE.MeshBasicMaterial({ color: 0xff5500 });
+const frontWheel = new THREE.Mesh(wheelGeo, wheelMat);
+frontWheel.position.set(1.5, -1, 0);
+bike.add(frontWheel);
+const backWheel = frontWheel.clone();
+backWheel.position.x = -1.5;
+bike.add(backWheel);
 
 bike.position.y = -8;
 scene.add(bike);
 
-// Переменные
+// Переменные игры
 let score = 0;
 let gameRunning = false;
 let playerLane = 0; // -1 лево, 0 центр, 1 право
 
-// Управление свайпом
+// Свайп управление
 let touchStartX = 0, touchStartY = 0;
 renderer.domElement.addEventListener('pointerdown', e => {
   touchStartX = e.clientX;
@@ -151,4 +140,59 @@ renderer.domElement.addEventListener('pointerdown', e => {
 renderer.domElement.addEventListener('pointerup', e => {
   if (!gameRunning) return;
   const dx = e.clientX - touchStartX;
-  const dy = touchStartY
+  const dy = touchStartY - e.clientY;
+
+  if (dy > 100) {
+    // прыжок
+    bike.position.y = -3;
+    setTimeout(() => { bike.position.y = -8; }, 1200);
+  } else if (Math.abs(dx) > 80) {
+    playerLane += dx > 0 ? 1 : -1;
+    playerLane = Math.max(-1, Math.min(1, playerLane));
+  }
+});
+
+// Меню + счёт
+const scoreEl = document.getElementById('score');
+const menuEl = document.getElementById('menu');
+const startBtn = document.getElementById('startBtn');
+
+startBtn.onclick = () => {
+  menuEl.style.display = 'none';
+  scoreEl.style.display = 'block';
+  gameRunning = true;
+  score = 0;
+  playerLane = 0;
+  bike.position.x = 0;
+};
+
+// Анимация
+function animate() {
+  requestAnimationFrame(animate);
+
+  if (gameRunning) {
+    tunnel.position.z += 1.5;
+    if (tunnel.position.z > 2500) tunnel.position.z -= 5000;
+
+    stars.position.z += 3;
+    if (stars.position.z > 2500) stars.position.z -= 5000;
+
+    bike.position.x = playerLane * 10;
+
+    score += 0.1;
+    scoreEl.innerText = `Счёт: ${Math.floor(score)}`;
+  }
+
+  renderer.render(scene, camera);
+}
+animate();
+
+// Resize
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

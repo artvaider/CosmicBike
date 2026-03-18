@@ -3,15 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cosmic Bike Runner</title>
+  <title>Cosmic Bike Runner 3D</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.min.js"></script>
   <style>
-    body { margin:0; overflow:hidden; background:#000; font-family:sans-serif; color:#fff; touch-action: none; }
-    canvas { display:block; width:100%; height:100%; }
-    #ui { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:10; }
+    body { margin:0; overflow:hidden; background:#000; touch-action:none; }
+    #ui { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:10; color:#fff; font-family:sans-serif; }
     #ui > * { pointer-events:auto; }
-    #menu { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); text-align:center; background:rgba(0,0,0,0.8); padding:50px 40px; border-radius:24px; display:flex; flex-direction:column; gap:24px; min-width:320px; box-shadow:0 0 40px rgba(0,255,136,0.4); }
-    button { padding:18px 60px; font-size:28px; background:#00ff88; color:#000; border:none; border-radius:16px; cursor:pointer; font-weight:bold; }
+    #score { position:absolute; top:20px; left:20px; font-size:32px; text-shadow:0 0 10px #000; }
+    #menu { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); text-align:center; background:rgba(0,0,0,0.8); padding:50px; border-radius:24px; display:flex; flex-direction:column; gap:24px; min-width:320px; box-shadow:0 0 40px #00ff88; }
+    button { padding:18px 60px; font-size:28px; background:#00ff88; color:#000; border:none; border-radius:16px; font-weight:bold; cursor:pointer; }
     button.secondary { background:#555; color:#fff; }
     h1 { margin:0; font-size:56px; color:#00ff88; text-shadow:0 0 20px #00ff88; }
   </style>
@@ -19,135 +20,157 @@
 <body>
 
 <div id="ui">
-  <div style="position:absolute; top:20px; left:20px; font-size:32px; text-shadow:0 0 10px #000;">
-    Счёт: <span id="score">0</span>
-  </div>
+  <div id="score">Счёт: 0</div>
   <div id="menu"></div>
 </div>
 
-<canvas id="canvas"></canvas>
-
 <script>
+// Telegram init
 const tg = window.Telegram.WebApp;
 tg.ready();
 tg.expand();
-tg.setBackgroundColor('#000');
 
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
+// Three.js setup
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000022);
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
+camera.position.z = 5;
 
-function resizeCanvas() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// Космический туннель (простой cylinder + stars)
+const tunnelGeo = new THREE.CylinderGeometry(10, 10, 1000, 32, 1, true);
+const tunnelMat = new THREE.MeshBasicMaterial({
+  color: 0x001133,
+  side: THREE.BackSide,
+  transparent: true,
+  opacity: 0.6
+});
+const tunnel = new THREE.Mesh(tunnelGeo, tunnelMat);
+tunnel.rotation.x = Math.PI / 2;
+scene.add(tunnel);
+
+// Звёзды (particle system)
+const starGeo = new THREE.BufferGeometry();
+const starCount = 5000;
+const positions = new Float32Array(starCount * 3);
+for (let i = 0; i < starCount; i++) {
+  positions[i*3] = (Math.random() - 0.5) * 200;
+  positions[i*3+1] = (Math.random() - 0.5) * 200;
+  positions[i*3+2] = (Math.random() - 0.5) * 1000 - 500;
 }
-resizeCanvas();
-window.addEventListener('resize', resizeCanvas);
+starGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.5 });
+const stars = new THREE.Points(starGeo, starMat);
+scene.add(stars);
 
-let playerLane = 1, lanes = 3;
-let score = 0, speed = 4; // замедлил базовую скорость
-let gameRunning = false, gameOver = false;
-let obstacles = [], bonuses = [];
-let isJumping = false, jumpVelocity = -28, gravity = 0.7, playerY = 0; // выше и медленнее падение
-let shieldTime = 0;
+// Велосипед (простой group)
+const bike = new THREE.Group();
+const wheelGeo = new THREE.CircleGeometry(0.8, 32);
+const wheelMat = new THREE.MeshBasicMaterial({ color: 0xff8800 });
+const frontWheel = new THREE.Mesh(wheelGeo, wheelMat);
+frontWheel.position.set(1.2, -1, 0);
+bike.add(frontWheel);
+const backWheel = new THREE.Mesh(wheelGeo, wheelMat);
+backWheel.position.set(-1.2, -1, 0);
+bike.add(backWheel);
+const body = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.5, 0.5), new THREE.MeshBasicMaterial({ color: 0x00ccff }));
+body.position.y = -0.5;
+bike.add(body);
+bike.position.y = -3;
+scene.add(bike);
 
-// Звёзды с parallax
-let stars = [];
-for (let i = 0; i < 400; i++) {
-  stars.push({
-    x: Math.random() * canvas.width,
-    y: Math.random() * canvas.height,
-    z: Math.random() * 3 + 0.5, // глубина
-    size: Math.random() * 4 + 1
-  });
-}
+// Переменные игры
+let playerLane = 0; // -1 left, 0 center, 1 right
+let score = 0;
+let speed = 0.5;
+let gameRunning = false;
+let obstacles = [];
 
-const laneWidth = () => canvas.width / lanes;
-const getLaneX = (lane) => (lane + 0.5) * laneWidth();
-const groundY = () => canvas.height - 180;
-
-// Свайп
-let touchStartY = 0;
-canvas.addEventListener('pointerdown', e => { touchStartY = e.clientY; });
-canvas.addEventListener('pointerup', e => {
-  if (!gameRunning || gameOver) return;
-  const deltaY = touchStartY - e.clientY;
-  if (deltaY > 120) { // сильнее свайп
-    if (!isJumping) {
-      isJumping = true;
-      playerY = jumpVelocity;
-    }
-  } else {
-    const touchX = e.clientX;
-    if (touchX < canvas.width / 2 && playerLane > 0) playerLane--;
-    else if (touchX > canvas.width / 2 && playerLane < lanes - 1) playerLane++;
+// Управление (свайп)
+let touchStartX = 0, touchStartY = 0;
+renderer.domElement.addEventListener('pointerdown', e => {
+  touchStartX = e.clientX;
+  touchStartY = e.clientY;
+});
+renderer.domElement.addEventListener('pointerup', e => {
+  if (!gameRunning) return;
+  const dx = e.clientX - touchStartX;
+  const dy = touchStartY - e.clientY;
+  if (dy > 100) { // свайп вверх — прыжок
+    bike.position.y = -1; // временный прыжок (потом анимация)
+    setTimeout(() => bike.position.y = -3, 800);
+  } else if (Math.abs(dx) > 50) {
+    if (dx < 0 && playerLane > -1) playerLane--;
+    if (dx > 0 && playerLane < 1) playerLane++;
   }
 });
 
-class Obstacle {
-  constructor(lane) {
-    this.lane = lane;
-    this.x = getLaneX(lane);
-    this.y = -150;
-    this.size = 100 + Math.random() * 50;
-    this.rotation = Math.random() * Math.PI * 2;
-  }
-  update() { this.y += speed * 1.2; this.rotation += 0.04; }
-  draw() {
-    ctx.save();
-    ctx.translate(this.x, this.y);
-    ctx.rotate(this.rotation);
-    ctx.fillStyle = '#888';
-    ctx.beginPath(); ctx.arc(0,0,this.size/2,0,Math.PI*2); ctx.fill();
-    ctx.strokeStyle = '#444'; ctx.lineWidth = 10; ctx.stroke();
-    ctx.restore();
+// Меню
+function showMenu(isStart = true) {
+  const menu = document.getElementById('menu');
+  menu.innerHTML = isStart ?
+    `<h1>Cosmic Bike 3D</h1><button id="play">Играть</button>` :
+    `<h1 style="color:#ff4444;">Game Over</h1><p>Счёт: ${Math.floor(score)}</p>
+     <button id="restart">Заново</button>
+     <button id="main" class="secondary">В меню</button>`;
+  menu.style.display = 'flex';
+  if (!isStart) {
+    document.getElementById('restart').onclick = startGame;
+    document.getElementById('main').onclick = () => showMenu(true);
+  } else {
+    document.getElementById('play').onclick = startGame;
   }
 }
 
-// ... (Bonus класс, checkCollision, collectBonuses, showMenu, startGame — без изменений, чтобы не удлинять)
-
-function loop() {
-  if (!gameRunning || gameOver) return;
-
-  const time = Date.now() * 0.0005; // медленнее пульсация
-
-  // Мягкий психоделический фон
-  const gradient = ctx.createRadialGradient(canvas.width/2, canvas.height/2, 0, canvas.width/2, canvas.height/2, Math.max(canvas.width, canvas.height));
-  gradient.addColorStop(0, `hsl(${time * 60 % 360}, 70%, 15%)`);
-  gradient.addColorStop(0.6, `hsl(${(time * 60 + 90) % 360}, 80%, 8%)`);
-  gradient.addColorStop(1, '#000111');
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  // Туннельные линии (медленнее)
-  ctx.strokeStyle = `rgba(200,255,255,${0.2 + Math.sin(time*3)*0.1})`;
-  ctx.lineWidth = 5;
-  for (let i = 0; i < 16; i++) {
-    const angle = i * Math.PI / 8 + time * 0.3;
-    const x1 = canvas.width/2 + Math.cos(angle) * 150;
-    const y1 = canvas.height/2 + Math.sin(angle) * 150;
-    const x2 = canvas.width/2 + Math.cos(angle) * canvas.width;
-    const y2 = canvas.height/2 + Math.sin(angle) * canvas.height;
-    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
-  }
-
-  // Звёзды (замедленные, мягче)
-  ctx.fillStyle = '#fff';
-  stars.forEach(s => {
-    s.y += speed * s.z * 0.4; // медленнее
-    if (s.y > canvas.height) s.y = -20;
-    ctx.globalAlpha = s.z * 0.4 + 0.3;
-    ctx.fillRect(s.x, s.y, s.size * s.z, s.size * s.z);
-  });
-  ctx.globalAlpha = 1;
-
-  // Препятствия, бонусы, прыжок, персонаж (как раньше)
-
-  // ... (остальной код loop без изменений)
-
-  requestAnimationFrame(loop);
+function startGame() {
+  document.getElementById('menu').style.display = 'none';
+  gameRunning = true;
+  score = 0;
+  speed = 0.5;
+  playerLane = 0;
+  bike.position.x = 0;
+  // очистка препятствий
+  obstacles.forEach(o => scene.remove(o));
+  obstacles = [];
+  loop();
 }
 
 showMenu(true);
+
+// Анимация
+function loop() {
+  requestAnimationFrame(loop);
+
+  if (gameRunning) {
+    // Движение вперёд
+    tunnel.position.z += speed;
+    if (tunnel.position.z > 500) tunnel.position.z = 0;
+
+    stars.position.z += speed * 2;
+    if (stars.position.z > 1000) stars.position.z = -1000;
+
+    // Смена полосы
+    bike.position.x = playerLane * 4;
+
+    score += 0.1;
+    document.getElementById('score').innerText = `Счёт: ${Math.floor(score)}`;
+
+    speed += 0.0001; // плавное ускорение
+  }
+
+  renderer.render(scene, camera);
+}
+loop();
+
+// Resize
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
 </script>
 </body>
 </html>

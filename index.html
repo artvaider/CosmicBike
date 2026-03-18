@@ -10,21 +10,20 @@
     canvas { display:block; width:100%; height:100%; }
     #ui { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:10; }
     #ui > * { pointer-events:auto; }
-    #menu { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); text-align:center; background:rgba(0,0,0,0.7); padding:40px; border-radius:20px; display:flex; flex-direction:column; gap:20px; min-width:280px; }
-    button { padding:15px 50px; font-size:28px; background:#00ff88; color:#000; border:none; border-radius:12px; cursor:pointer; font-weight:bold; }
-    h1 { margin:0; font-size:52px; color:#00ff88; text-shadow:0 0 10px #00ff88; }
+    #menu { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); text-align:center; background:rgba(0,0,0,0.75); padding:50px 40px; border-radius:24px; display:flex; flex-direction:column; gap:24px; min-width:320px; box-shadow:0 0 30px rgba(0,255,136,0.3); }
+    button { padding:18px 60px; font-size:28px; background:#00ff88; color:#000; border:none; border-radius:16px; cursor:pointer; font-weight:bold; box-shadow:0 4px 12px rgba(0,0,0,0.4); }
+    button.secondary { background:#444; color:#fff; }
+    h1 { margin:0; font-size:56px; color:#00ff88; text-shadow:0 0 16px #00ff88; }
+    p { font-size:32px; margin:10px 0; }
   </style>
 </head>
 <body>
 
 <div id="ui">
-  <div style="position:absolute; top:20px; left:20px; font-size:28px; text-shadow:0 0 8px #000;">
+  <div style="position:absolute; top:20px; left:20px; font-size:32px; text-shadow:0 0 10px #000;">
     Счёт: <span id="score">0</span>
   </div>
-  <div id="menu">
-    <h1>Cosmic Bike</h1>
-    <button id="startBtn">Играть</button>
-  </div>
+  <div id="menu"></div>
 </div>
 
 <canvas id="canvas"></canvas>
@@ -45,67 +44,116 @@ function resizeCanvas() {
 resizeCanvas();
 window.addEventListener('resize', resizeCanvas);
 
-let playerLane = 1; // 0 left, 1 center, 2 right
+let playerLane = 1;
 const lanes = 3;
 let score = 0;
 let speed = 5;
 let gameRunning = false;
 let gameOver = false;
 let obstacles = [];
+let isJumping = false;
+let jumpVelocity = -18;
+let gravity = 0.8;
+let playerY = 0; // смещение вверх при прыжке
 
 const laneWidth = () => canvas.width / lanes;
 const getLaneX = (lane) => (lane + 0.5) * laneWidth();
+const groundY = () => canvas.height - 180;
 
 // Управление
 canvas.addEventListener('pointerdown', (e) => {
   if (!gameRunning || gameOver) return;
   const touchX = e.clientX;
-  if (touchX < canvas.width / 2) {
-    if (playerLane > 0) playerLane--;
+  const touchY = e.clientY;
+
+  if (touchY < canvas.height * 0.4) { // верх экрана — прыжок
+    if (!isJumping) {
+      isJumping = true;
+      playerY = jumpVelocity;
+    }
   } else {
-    if (playerLane < lanes - 1) playerLane++;
+    // нижняя часть — смена полосы
+    if (touchX < canvas.width / 2) {
+      if (playerLane > 0) playerLane--;
+    } else {
+      if (playerLane < lanes - 1) playerLane++;
+    }
   }
 });
 
-// Препятствие
 class Obstacle {
   constructor(lane) {
     this.lane = lane;
     this.x = getLaneX(lane);
-    this.y = -80;
-    this.size = 70 + Math.random() * 40;
-    this.color = `hsl(${Math.random()*60 + 180}, 100%, 50%)`; // психоделические цвета
+    this.y = -100;
+    this.size = 80 + Math.random() * 60;
+    this.rotation = Math.random() * Math.PI * 2;
+    this.rotSpeed = (Math.random() - 0.5) * 0.08;
   }
   update() {
-    this.y += speed * 1.2;
+    this.y += speed * 1.4;
+    this.rotation += this.rotSpeed;
   }
   draw() {
-    ctx.fillStyle = this.color;
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.rotation);
+    ctx.fillStyle = '#888';
     ctx.beginPath();
-    ctx.arc(this.x, this.y, this.size/2, 0, Math.PI*2);
+    ctx.arc(0, 0, this.size/2, 0, Math.PI*2);
     ctx.fill();
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 4;
+    ctx.strokeStyle = '#444';
+    ctx.lineWidth = 8;
     ctx.stroke();
+    // кратеры
+    ctx.fillStyle = '#555';
+    ctx.beginPath();
+    ctx.arc(-this.size*0.2, -this.size*0.1, this.size*0.15, 0, Math.PI*2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(this.size*0.25, this.size*0.05, this.size*0.2, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
   }
 }
 
-// Проверка столкновения
 function checkCollision() {
   const px = getLaneX(playerLane);
-  const py = canvas.height - 120;
+  const py = groundY() + playerY;
   for (let obs of obstacles) {
+    if (Math.abs(obs.lane - playerLane) > 0) continue; // только на той же полосе
+    if (obs.y < py - 100 || obs.y > py + 100) continue; // далеко по y — пропускаем
     const dx = px - obs.x;
     const dy = py - obs.y;
     const dist = Math.sqrt(dx*dx + dy*dy);
-    if (dist < obs.size/2 + 50) { // 50 = радиус игрока примерно
+    if (dist < obs.size/2 + 60) {
       return true;
     }
   }
   return false;
 }
 
-// Запуск игры
+function showMenu(isStart = true) {
+  const menu = document.getElementById('menu');
+  if (isStart) {
+    menu.innerHTML = `
+      <h1>Cosmic Bike</h1>
+      <button id="playBtn">Играть</button>
+    `;
+    document.getElementById('playBtn').onclick = startGame;
+  } else {
+    menu.innerHTML = `
+      <h1 style="color:#ff4444;">Game Over</h1>
+      <p>Счёт: ${Math.floor(score)}</p>
+      <button id="restartBtn">Заново</button>
+      <button id="mainMenuBtn" class="secondary">В главное меню</button>
+    `;
+    document.getElementById('restartBtn').onclick = startGame;
+    document.getElementById('mainMenuBtn').onclick = () => showMenu(true);
+  }
+  menu.style.display = 'flex';
+}
+
 function startGame() {
   document.getElementById('menu').style.display = 'none';
   gameRunning = true;
@@ -113,34 +161,33 @@ function startGame() {
   score = 0;
   speed = 5;
   playerLane = 1;
+  playerY = 0;
+  isJumping = false;
   obstacles = [];
   loop();
 }
 
-document.getElementById('startBtn').addEventListener('click', startGame);
-
-// Спавн препятствий
 setInterval(() => {
   if (!gameRunning || gameOver) return;
   const lane = Math.floor(Math.random() * lanes);
   obstacles.push(new Obstacle(lane));
-}, 1800 - score*2); // чаще со временем
+}, 1400 - Math.min(score * 1.5, 900)); // чаще со временем
 
 function loop() {
   if (!gameRunning || gameOver) return;
 
-  ctx.fillStyle = 'rgba(0,0,0,0.1)';
+  ctx.fillStyle = 'rgba(0,0,0,0.12)';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   // Полосы
-  const colors = ['#0044ff', '#00cc44', '#ff6600'];
+  const colors = ['#0033aa', '#008833', '#aa4400'];
   for (let i = 0; i < lanes; i++) {
     ctx.fillStyle = colors[i];
     ctx.fillRect(i * laneWidth(), 0, laneWidth(), canvas.height);
   }
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 8;
-  ctx.setLineDash([30, 60]);
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+  ctx.lineWidth = 10;
+  ctx.setLineDash([40, 80]);
   for (let i = 1; i < lanes; i++) {
     ctx.beginPath();
     ctx.moveTo(i * laneWidth(), 0);
@@ -149,69 +196,69 @@ function loop() {
   }
   ctx.setLineDash([]);
 
-  // Звёзды
+  // Звёзды / частицы
   ctx.fillStyle = '#fff';
-  for (let i = 0; i < 120; i++) {
-    let x = (Math.sin(i * 100 + Date.now()*0.0005) * canvas.width/2 + canvas.width/2) % canvas.width;
-    let y = (Date.now() * 0.15 + i * 40) % canvas.height;
-    ctx.globalAlpha = 0.6 + Math.sin(Date.now()*0.001 + i)*0.4;
-    ctx.fillRect(x, y, 4, 4);
+  for (let i = 0; i < 150; i++) {
+    let x = Math.random() * canvas.width;
+    let y = (Date.now() * 0.18 + i * 35) % canvas.height;
+    ctx.globalAlpha = 0.5 + Math.sin(Date.now() * 0.002 + i) * 0.5;
+    ctx.fillRect(x, y, 3 + Math.random()*3, 3 + Math.random()*3);
   }
   ctx.globalAlpha = 1;
 
   // Препятствия
-  obstacles = obstacles.filter(obs => obs.y < canvas.height + 100);
-  obstacles.forEach(obs => {
-    obs.update();
-    obs.draw();
-  });
+  obstacles = obstacles.filter(o => o.y < canvas.height + 150);
+  obstacles.forEach(o => { o.update(); o.draw(); });
 
-  // Персонаж (лучше виден)
+  // Прыжок физика
+  if (isJumping) {
+    playerY += gravity;
+    if (playerY >= 0) {
+      playerY = 0;
+      isJumping = false;
+    }
+  }
+
+  // Персонаж
   const px = getLaneX(playerLane);
-  const py = canvas.height - 140;
-  // Тень/glow
-  ctx.shadowColor = '#00ff88';
-  ctx.shadowBlur = 20;
-  ctx.fillStyle = '#00ff88';
-  ctx.fillRect(px - 50, py - 20, 100, 40); // рама
-  ctx.shadowBlur = 0;
+  const baseY = groundY() + playerY;
 
+  // Рама + колёса + голова
+  ctx.fillStyle = '#00ccff';
+  ctx.fillRect(px - 60, baseY - 30, 120, 20); // основная рама
   ctx.fillStyle = '#ff8800';
   ctx.beginPath();
-  ctx.arc(px, py - 60, 45, 0, Math.PI*2); // голова/переднее колесо
+  ctx.arc(px - 40, baseY, 35, 0, Math.PI*2); // заднее колесо
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(px + 40, baseY, 35, 0, Math.PI*2); // переднее колесо
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(px + 30, baseY - 60, 28, 0, Math.PI*2); // голова
   ctx.fill();
 
-  // Белая обводка
+  // Обводка
   ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 6;
+  ctx.lineWidth = 8;
   ctx.stroke();
 
-  // Простая анимация "педалей"
-  ctx.fillStyle = '#000';
-  ctx.fillRect(px - 20, py - 10, 40, 10);
-
   // Счёт + ускорение
-  score += 0.3;
+  score += 0.35;
   document.getElementById('score').innerText = Math.floor(score);
-  speed = 5 + score * 0.008;
+  speed = 5 + score * 0.01;
 
   if (checkCollision()) {
     gameOver = true;
     gameRunning = false;
-    const menu = document.getElementById('menu');
-    menu.innerHTML = `
-      <h1 style="color:#ff4444;">Game Over</h1>
-      <p style="font-size:32px;">Счёт: ${Math.floor(score)}</p>
-      <button onclick="location.reload()">Заново</button>
-    `;
-    menu.style.display = 'flex';
+    showMenu(false);
   }
 
   requestAnimationFrame(loop);
 }
 
-// Старт с меню
-document.getElementById('menu').style.display = 'flex';
+// Инициализация
+showMenu(true);
 
 </script>
 </body>

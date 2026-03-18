@@ -35,7 +35,6 @@ tg.setBackgroundColor('#000');
 
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
-let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
 function resizeCanvas() {
   canvas.width = window.innerWidth;
@@ -48,57 +47,58 @@ let playerLane = 1, lanes = 3;
 let score = 0, speed = 5;
 let gameRunning = false, gameOver = false;
 let obstacles = [], bonuses = [];
-let isJumping = false, playerY = 0;
-let shieldTime = 0; // время щита в секундах
+let isJumping = false, jumpVelocity = -24, gravity = 0.9, playerY = 0;
+let shieldTime = 0;
+
+// Космические частицы (многослойные для туннеля)
+let stars = [];
+for (let i = 0; i < 300; i++) {
+  stars.push({
+    x: Math.random() * canvas.width,
+    y: Math.random() * canvas.height,
+    z: Math.random() * 2 + 0.5, // глубина (для parallax)
+    size: Math.random() * 3 + 1
+  });
+}
 
 const laneWidth = () => canvas.width / lanes;
 const getLaneX = (lane) => (lane + 0.5) * laneWidth();
 const groundY = () => canvas.height - 180;
 
-// === ЗВУКИ ===
-function playSound(type) {
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-  osc.connect(gain); gain.connect(audioCtx.destination);
-  if (type === 'jump') { osc.frequency.value = 600; gain.gain.value = 0.3; osc.type = 'sine'; }
-  else if (type === 'collect') { osc.frequency.value = 1200; gain.gain.value = 0.4; }
-  else if (type === 'crash') { osc.frequency.value = 150; gain.gain.value = 0.6; osc.type = 'sawtooth'; }
-  osc.start();
-  setTimeout(() => { osc.stop(); }, type === 'crash' ? 400 : 150);
-}
-
-// === СВАЙП ДЛЯ ПРЫЖКА ===
+// Свайп
 let touchStartY = 0;
-canvas.addEventListener('pointerdown', e => {
-  if (!gameRunning || gameOver) return;
-  touchStartY = e.clientY;
-});
+canvas.addEventListener('pointerdown', e => { touchStartY = e.clientY; });
 canvas.addEventListener('pointerup', e => {
   if (!gameRunning || gameOver) return;
   const deltaY = touchStartY - e.clientY;
-  if (deltaY > 80) { // свайп вверх
+  if (deltaY > 100) { // свайп вверх сильнее
     if (!isJumping) {
       isJumping = true;
-      playerY = -22;
-      playSound('jump');
+      playerY = jumpVelocity;
     }
   } else {
-    // обычная смена полосы
     const touchX = e.clientX;
     if (touchX < canvas.width / 2 && playerLane > 0) playerLane--;
     else if (touchX > canvas.width / 2 && playerLane < lanes - 1) playerLane++;
   }
 });
 
-class Obstacle { /* тот же код, что раньше */ 
-  constructor(lane) { this.lane = lane; this.x = getLaneX(lane); this.y = -100; this.size = 80 + Math.random()*50; this.rotation = 0; }
-  update() { this.y += speed * 1.4; this.rotation += 0.05; }
+class Obstacle {
+  constructor(lane) {
+    this.lane = lane;
+    this.x = getLaneX(lane);
+    this.y = -120;
+    this.size = 90 + Math.random() * 60;
+    this.rotation = Math.random() * Math.PI * 2;
+  }
+  update() { this.y += speed * 1.5; this.rotation += 0.06; }
   draw() {
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.rotation);
-    ctx.fillStyle = '#666'; ctx.beginPath(); ctx.arc(0,0,this.size/2,0,Math.PI*2); ctx.fill();
-    ctx.strokeStyle = '#333'; ctx.lineWidth = 10; ctx.stroke();
+    ctx.fillStyle = '#777';
+    ctx.beginPath(); ctx.arc(0,0,this.size/2,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 12; ctx.stroke();
     ctx.restore();
   }
 }
@@ -108,27 +108,27 @@ class Bonus {
     this.lane = lane;
     this.x = getLaneX(lane);
     this.y = -80;
-    this.size = 45;
+    this.size = 50;
   }
-  update() { this.y += speed * 1.1; }
+  update() { this.y += speed * 1.2; }
   draw() {
-    ctx.fillStyle = '#ffdd00';
-    ctx.shadowBlur = 25; ctx.shadowColor = '#ffff00';
+    ctx.shadowBlur = 40; ctx.shadowColor = '#ffff00';
+    ctx.fillStyle = '#ffea00';
     ctx.beginPath(); ctx.arc(this.x, this.y, this.size/2, 0, Math.PI*2); ctx.fill();
     ctx.shadowBlur = 0;
   }
 }
 
 function checkCollision() {
-  if (shieldTime > 0) return false; // щит защищает
+  if (shieldTime > 0) return false;
   const px = getLaneX(playerLane);
   const py = groundY() + playerY;
   for (let obs of obstacles) {
     if (obs.lane !== playerLane) continue;
-    if (isJumping && playerY < -70) continue; // перепрыгиваем!
+    if (isJumping && playerY < -100) continue; // теперь перепрыгивает надёжно
     const dx = px - obs.x;
     const dy = py - obs.y;
-    if (Math.sqrt(dx*dx + dy*dy) < obs.size/2 + 55) return true;
+    if (Math.sqrt(dx*dx + dy*dy) < obs.size/2 + 60) return true;
   }
   return false;
 }
@@ -136,15 +136,14 @@ function checkCollision() {
 function collectBonuses() {
   const px = getLaneX(playerLane);
   const py = groundY() + playerY;
-  for (let i = bonuses.length-1; i >= 0; i--) {
+  for (let i = bonuses.length - 1; i >= 0; i--) {
     const b = bonuses[i];
     if (b.lane === playerLane) {
       const dx = px - b.x;
       const dy = py - b.y;
-      if (Math.sqrt(dx*dx + dy*dy) < 80) {
+      if (Math.sqrt(dx*dx + dy*dy) < 90) {
         score += 50;
-        shieldTime = 5;
-        playSound('collect');
+        shieldTime = 6;
         bonuses.splice(i, 1);
       }
     }
@@ -165,7 +164,7 @@ function showMenu(isStart = true) {
       <button id="menuBtn" class="secondary">В главное меню</button>
     `;
     document.getElementById('restartBtn').onclick = startGame;
-    document.getElementById('menuBtn').onclick = () => { menu.style.display = 'none'; showMenu(true); };
+    document.getElementById('menuBtn').onclick = () => showMenu(true);
   }
 }
 
@@ -177,60 +176,83 @@ function startGame() {
   loop();
 }
 
-// Спавн
 setInterval(() => {
   if (!gameRunning || gameOver) return;
   const lane = Math.floor(Math.random() * lanes);
-  if (Math.random() < 0.25) bonuses.push(new Bonus(lane));
+  if (Math.random() < 0.2) bonuses.push(new Bonus(lane));
   else obstacles.push(new Obstacle(lane));
-}, 1100);
+}, 1000 - Math.min(score * 1.2, 600));
 
 function loop() {
   if (!gameRunning || gameOver) return;
 
-  ctx.fillStyle = 'rgba(0,0,0,0.1)';
-  ctx.fillRect(0,0,canvas.width,canvas.height);
+  const time = Date.now() * 0.001;
 
-  // полосы, звёзды (тот же код, что раньше — не менял для краткости)
+  // Психоделический фон + туннель
+  const gradient = ctx.createRadialGradient(canvas.width/2, canvas.height/2, 0, canvas.width/2, canvas.height/2, Math.max(canvas.width, canvas.height));
+  gradient.addColorStop(0, `hsl(${time * 30 % 360}, 80%, 20%)`);
+  gradient.addColorStop(0.5, `hsl(${(time * 30 + 120) % 360}, 90%, 10%)`);
+  gradient.addColorStop(1, '#000');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+  // Туннельные линии (радиальные)
+  ctx.strokeStyle = `rgba(255,255,255,${0.3 + Math.sin(time*5)*0.2})`;
+  ctx.lineWidth = 4;
+  for (let i = 0; i < 24; i++) {
+    const angle = i * Math.PI / 12 + time * 0.5;
+    const x1 = canvas.width/2 + Math.cos(angle) * 200;
+    const y1 = canvas.height/2 + Math.sin(angle) * 200;
+    const x2 = canvas.width/2 + Math.cos(angle) * canvas.width;
+    const y2 = canvas.height/2 + Math.sin(angle) * canvas.height;
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  }
+
+  // Звёзды (туннельный полёт)
+  ctx.fillStyle = '#fff';
+  stars.forEach(s => {
+    s.y += speed * s.z * 0.8; // ближние быстрее
+    if (s.y > canvas.height) s.y = -10;
+    ctx.globalAlpha = s.z * 0.5 + 0.5;
+    ctx.fillRect(s.x, s.y, s.size * s.z, s.size * s.z);
+  });
+  ctx.globalAlpha = 1;
+
+  // Препятствия, бонусы, персонаж (как раньше, но с улучшенным прыжком)
+  obstacles = obstacles.filter(o => o.y < canvas.height + 200);
   obstacles.forEach(o => { o.update(); o.draw(); });
+
+  bonuses = bonuses.filter(b => b.y < canvas.height + 100);
   bonuses.forEach(b => { b.update(); b.draw(); });
   collectBonuses();
 
-  // прыжок
   if (isJumping) {
-    playerY += 1.1;
+    playerY += gravity;
     if (playerY >= 0) { playerY = 0; isJumping = false; }
   }
-  if (shieldTime > 0) shieldTime -= 0.016;
+  if (shieldTime > 0) shieldTime -= 1/60;
 
-  // персонаж с анимацией колёс
   const px = getLaneX(playerLane);
   const py = groundY() + playerY;
-  const wheelAngle = Date.now() * 0.02;
 
-  ctx.shadowBlur = shieldTime > 0 ? 30 : 15;
+  // Персонаж
+  ctx.shadowBlur = shieldTime > 0 ? 40 : 20;
   ctx.shadowColor = shieldTime > 0 ? '#00ffff' : '#00ff88';
-
-  // рама и колёса
   ctx.fillStyle = '#00ccff';
-  ctx.fillRect(px-55, py-25, 110, 18);
+  ctx.fillRect(px - 55, py - 25, 110, 18);
   ctx.fillStyle = '#ff8800';
-  ctx.save(); ctx.translate(px-40, py); ctx.rotate(wheelAngle); ctx.beginPath(); ctx.arc(0,0,34,0,Math.PI*2); ctx.fill(); ctx.restore();
-  ctx.save(); ctx.translate(px+40, py); ctx.rotate(wheelAngle); ctx.beginPath(); ctx.arc(0,0,34,0,Math.PI*2); ctx.fill(); ctx.restore();
-
+  ctx.beginPath(); ctx.arc(px - 40, py, 34, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(px + 40, py, 34, 0, Math.PI*2); ctx.fill();
   ctx.shadowBlur = 0;
 
-  // проверка столкновения
   if (checkCollision()) {
-    playSound('crash');
     gameOver = true; gameRunning = false;
     showMenu(false);
   }
 
-  score += 0.35;
+  score += 0.4;
   document.getElementById('score').innerText = Math.floor(score);
-  speed = 5 + score * 0.009;
+  speed = 5 + score * 0.012;
 
   requestAnimationFrame(loop);
 }

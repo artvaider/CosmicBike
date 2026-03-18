@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Cosmic Bike Runner</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    body { margin:0; overflow:hidden; background:#000; font-family:sans-serif; color:#fff; }
+    canvas { display:block; }
+    #ui { position:absolute; top:10px; left:10px; z-index:10; }
+  </style>
+</head>
+<body>
+
+<div id="ui">
+  <div>Счёт: <span id="score">0</span></div>
+  <button onclick="restart()">Заново</button>
+</div>
+
+<canvas id="canvas"></canvas>
+
+<script>
+const tg = window.Telegram.WebApp;
+tg.ready();
+tg.expand(); // растягиваем на весь экран
+tg.setBackgroundColor('#000'); // тёмный фон
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+let playerX = canvas.width / 2;
+const playerY = canvas.height - 120;
+let score = 0;
+let speed = 5;
+let gameOver = false;
+
+// Для движения по тапу
+canvas.addEventListener('pointerdown', (e) => {
+  if (gameOver) return;
+  const touchX = e.clientX || e.touches[0].clientX;
+  if (touchX < canvas.width / 2) {
+    playerX -= 120; // влево
+  } else {
+    playerX += 120; // вправо
+  }
+  // Ограничиваем, чтобы не улетел за экран
+  playerX = Math.max(60, Math.min(canvas.width - 60, playerX));
+});
+
+// Анимация
+function loop() {
+  if (gameOver) return;
+
+  ctx.fillStyle = 'rgba(0,0,0,0.1)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height); // лёгкий след для психоделии
+
+  // Дорога (оранжевые линии)
+  ctx.strokeStyle = `hsl(${Date.now() % 360}, 100%, 50%)`; // меняющийся цвет
+  ctx.lineWidth = 8;
+  for (let i = 0; i < 10; i++) {
+    let y = (Date.now() * speed / 2 + i * 150) % (canvas.height + 300) - 150;
+    ctx.beginPath();
+    ctx.moveTo(canvas.width/3, y);
+    ctx.lineTo(canvas.width/3, y + 100);
+    ctx.moveTo(canvas.width*2/3, y);
+    ctx.lineTo(canvas.width*2/3, y + 100);
+    ctx.stroke();
+  }
+
+  // Звёзды (просто точки)
+  ctx.fillStyle = '#fff';
+  for (let i = 0; i < 80; i++) {
+    let x = (Math.sin(i * 123) * canvas.width + Date.now() * 0.03) % canvas.width;
+    let y = (Math.cos(i * 456) * canvas.height + Date.now() * 0.07) % canvas.height;
+    ctx.fillRect(x, y, 2, 2);
+  }
+
+  // Велик + чувак (простой прямоугольник + круг)
+  ctx.fillStyle = '#00ff88';
+  ctx.fillRect(playerX - 40, playerY - 40, 80, 40); // рама
+  ctx.fillStyle = '#ff8800';
+  ctx.beginPath();
+  ctx.arc(playerX, playerY - 60, 30, 0, Math.PI*2); // голова
+  ctx.fill();
+
+  // Счёт
+  score += 0.1;
+  document.getElementById('score').innerText = Math.floor(score);
+
+  // Ускорение со временем
+  if (score > 100) speed = 7;
+  if (score > 300) speed = 10;
+
+  requestAnimationFrame(loop);
+}
+
+function restart() {
+  score = 0;
+  speed = 5;
+  playerX = canvas.width / 2;
+  gameOver = false;
+  loop();
+}
+
+loop(); // запускаем
+
+// Если хочешь добавить game over — потом добавим препятствия
+</script>
+</body>
+</html>
